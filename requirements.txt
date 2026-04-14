@@ -1,0 +1,7 @@
+playwright>=1.40.0
+customtkinter>=5.2.2
+pyinstaller>=6.5.0
+Pillow>=10.0.0
+numpy>=1.26.0
+sounddevice>=0.4.7
+faster-whisper>=1.0.3
