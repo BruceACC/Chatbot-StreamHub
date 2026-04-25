@@ -21,7 +21,6 @@ class BotControl(ctk.CTkFrame):
         super().__init__(parent, corner_radius=12, **kwargs)
         self._on_start = on_start
         self._on_stop = on_stop
-        self._on_refresh = None
         self._running = False
         self._build()
 
@@ -66,21 +65,6 @@ class BotControl(ctk.CTkFrame):
         )
         self._stop_btn.grid(row=0, column=1, sticky="ew", padx=(4, 0))
 
-        # Refresh config button
-        self._refresh_btn = ctk.CTkButton(
-            btn_frame,
-            text="🔄 Refrescar Config",
-            font=ctk.CTkFont("Segoe UI", 11, "bold"),
-            fg_color="#2a4a9a",
-            hover_color="#1a3a7a",
-            text_color="#aaccff",
-            height=34,
-            corner_radius=8,
-            state="disabled",
-            command=self._do_refresh,
-        )
-        self._refresh_btn.grid(row=1, column=0, columnspan=2, sticky="ew", padx=0, pady=(4, 0))
-
         # Status indicator
         self._status_lbl = ctk.CTkLabel(
             self, text="● Inactivo",
@@ -124,24 +108,15 @@ class BotControl(ctk.CTkFrame):
     def _do_stop(self):
         self._on_stop()
 
-    def _do_refresh(self):
-        if self._on_refresh:
-            self._on_refresh()
-
-    def set_on_refresh(self, callback: callable):
-        self._on_refresh = callback
-
     def set_running(self, running: bool):
         self._running = running
         if running:
             self._start_btn.configure(state="disabled")
             self._stop_btn.configure(state="normal")
-            self._refresh_btn.configure(state="normal")
             self._status_lbl.configure(text="● En Ejecución", text_color=C_ACCENT)
         else:
             self._start_btn.configure(state="normal")
             self._stop_btn.configure(state="disabled")
-            self._refresh_btn.configure(state="disabled")
             self._status_lbl.configure(text="● Inactivo", text_color=C_MUTED)
 
     def log(self, message: str):

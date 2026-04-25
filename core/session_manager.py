@@ -5,10 +5,8 @@ Sessions are stored as JSON files so they persist across app restarts.
 """
 
 import json
-import os
 import threading
 from pathlib import Path
-from playwright.sync_api import sync_playwright
 
 SESSIONS_DIR = Path("sessions")
 ACCOUNTS_FILE = SESSIONS_DIR / "accounts.json"
@@ -79,7 +77,7 @@ def delete_account(name: str):
 
 def add_account(name: str, proxy: str = None, on_done: callable = None, on_error: callable = None):
     """
-    Opens a headed Chromium browser so the user can log in to Kick.com.
+    Uses the shared Chromium browser so the user can log in to Kick.com.
     When login is detected (avatar appears), saves the session and closes.
     Runs in a background thread so the GUI isn't blocked.
     """
@@ -88,113 +86,11 @@ def add_account(name: str, proxy: str = None, on_done: callable = None, on_error
             _ensure_dirs()
             session_dir = SESSIONS_DIR / name
             session_dir.mkdir(parents=True, exist_ok=True)
-            state_path = get_session_path(name)
-
             pw_proxy = parse_proxy(proxy)
+            from core.browser_manager import get_shared_browser_manager
 
-            with sync_playwright() as p:
-                browser = p.chromium.launch(
-                    channel="chrome",  # Use the system's real Google Chrome!
-                    headless=False,
-                    args=[
-                        "--start-maximized",
-                        "--disable-blink-features=AutomationControlled"
-                    ],
-                    ignore_default_args=["--enable-automation"],
-                    proxy=pw_proxy if pw_proxy else None
-                )
-                
-                # Setup context without a hardcoded user-agent (real Chrome handles it)
-                context = browser.new_context(
-                    storage_state=str(state_path) if state_path.exists() else None,
-                    viewport=None,
-                )
-                
-                # Hide webdriver property via initialization script
-                context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-                page = context.new_page()
-
-                def _has_email_password_form() -> bool:
-                    try:
-                        has_email = page.locator('input[type="email"], input[name*="email" i]').count() > 0
-                        has_password = page.locator('input[type="password"], input[name*="password" i]').count() > 0
-                        return has_email and has_password
-                    except Exception:
-                        return False
-
-                def _try_open_email_login() -> None:
-                    # Kick can render different auth flows depending on region/account.
-                    # We try common routes and then try sign-in controls from home.
-                    candidate_urls = [
-                        "https://kick.com/login",
-                        "https://kick.com/auth/login",
-                        "https://kick.com/",
-                    ]
-
-                    for target in candidate_urls:
-                        try:
-                            page.goto(target, wait_until="domcontentloaded", timeout=30_000)
-                        except Exception:
-                            continue
-                        if _has_email_password_form():
-                            return
-
-                    sign_in_labels = ["Log in", "Sign in", "Iniciar sesion", "Iniciar sesion"]
-                    for label in sign_in_labels:
-                        try:
-                            btn = page.get_by_role("button", name=label)
-                            if btn.count() > 0:
-                                btn.first.click(timeout=5_000)
-                                page.wait_for_timeout(800)
-                                if _has_email_password_form():
-                                    return
-                        except Exception:
-                            pass
-
-                        try:
-                            link = page.get_by_role("link", name=label)
-                            if link.count() > 0:
-                                link.first.click(timeout=5_000)
-                                page.wait_for_timeout(800)
-                                if _has_email_password_form():
-                                    return
-                        except Exception:
-                            pass
-
-                _try_open_email_login()
-
-                # Poll until the user is logged in (avatar element appears)
-                # or until they close the window
-                logged_in = False
-                page.set_default_timeout(300_000)  # 5 minute max
-
-                try:
-                    # Wait for avatar/profile menu or URL change indicating login
-                    # We also accept wait_for_function that checks if auth cookie exists
-                    page.wait_for_function(
-                        """
-                        () => {
-                            // Check if avatar is present
-                            const avatar = document.querySelector('button[aria-label="Open user menu"], [data-testid="user-menu-button"], img[alt*="avatar"], .user-profile-picture, [class*="UserMenu"], [class*="user-menu"]');
-                            // Or check if there's a specific button like "Obtén KICKs"
-                            const kickBtn = Array.from(document.querySelectorAll('button')).find(el => el.textContent.includes("Obtén KICKs"));
-
-                            // Treat session as logged in only when clear user UI is present.
-                            return (avatar !== null || kickBtn !== undefined);
-                        }
-                        """,
-                        timeout=300_000,
-                    )
-                    logged_in = True
-                except Exception:
-                    # Fallback check just in case it closed manually but user was logged in
-                    pass
-
-                if logged_in:
-                    context.storage_state(path=str(state_path))
-
-                context.close()
-                browser.close()
+            browser_manager = get_shared_browser_manager()
+            logged_in = browser_manager.login_account(name, pw_proxy)
 
             if logged_in:
                 # Update accounts list

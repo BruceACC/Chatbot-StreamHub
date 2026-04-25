@@ -53,6 +53,10 @@ class SpamEngine:
         self._pool = pool
         self._config = config
 
+    def reconfigure(self, config: SpamConfig):
+        """Update config while running without stopping the engine."""
+        self._config = config
+
     def start(self):
         if self._running:
             return

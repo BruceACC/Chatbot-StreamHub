@@ -103,9 +103,6 @@ def truncate_chat_text_ignoring_emotes(text: str, max_chars: int) -> str:
     return "".join(out).strip()
 
 
-<<<<<<< Updated upstream
-def generate_ollama_response(prompt: str, model: str = "llama3", max_chars: int = 500) -> str:
-=======
 def strip_unicode_emojis(text: str) -> str:
     """Remove unicode emojis while preserving regular text and Kick emote tokens."""
     if not text:
@@ -135,7 +132,6 @@ def generate_ollama_response(
     emote_only: bool = False,
     image_base64: str | None = None,
 ) -> str:
->>>>>>> Stashed changes
     if not prompt.strip():
         raise ValueError("El prompt de IA no puede estar vacio.")
 
@@ -148,12 +144,20 @@ Responde de forma casual, natural y corta como lo haría una persona mirando la 
 - Usa tono conversacional, picante y divertido, pero sin insultar ni faltar el respeto
 - Reacciona emocionalmente si es apropiado
 - No uses formateo especial ni asteriscos
-- Puedes usar emojis cuando sumen a la reaccion
+- No uses emojis unicode como caritas o iconos
 - Usa puntuación simple y texto fácil de enviar en chat
 - Parece que estás chateando mientras ves el stream
 - Usa emotes de Kick en formato [emote:ID:NOMBRE] cuando ayuden a expresar la reacción
 - Usa entre 0 y 2 emotes por mensaje, sin repetir el mismo emote dos veces seguidas
-- Si quieres, tambien puedes responder solo con emotes o solo con emojis"""
+- A veces puedes responder solo con emotes de Kick"""
+
+    if emote_only:
+        system_context = (
+            f"{system_context}\n"
+            "- Responde SOLO con emotes de Kick\n"
+            "- No escribas palabras normales\n"
+            "- Usa de 1 a 3 emotes en formato [emote:ID:NOMBRE]"
+        )
 
     system_context = f"{system_context}\n\nGuia de emotes del canal:\n{EMOTE_GUIDE}"
 
@@ -194,4 +198,5 @@ Responde de forma casual, natural y corta como lo haría una persona mirando la 
     if not answer:
         raise RuntimeError("Ollama no devolvio contenido.")
 
+    answer = strip_unicode_emojis(answer)
     return truncate_chat_text_ignoring_emotes(answer, max_chars)

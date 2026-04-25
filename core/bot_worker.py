@@ -1,41 +1,16 @@
 """
 bot_worker.py
-One BotWorker per Kick.com account. Runs a Playwright browser context,
-navigates to the channel chat popout, and sends messages on demand.
+One BotWorker per Kick.com account. Uses a shared Playwright browser,
+creates one isolated context per account, and sends messages on demand.
 """
 
 import threading
-import time
 import logging
 import re
-from pathlib import Path
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
-from core.session_manager import get_session_path, get_proxy
+from core.browser_manager import get_shared_browser_manager
 
 logger = logging.getLogger(__name__)
-
-# CSS selectors for Kick.com chat input (may need updating if Kick changes their DOM)
-CHAT_INPUT_SELECTORS = [
-    '[data-testid="chat-input"]',
-    'div[contenteditable="true"][class*="chat"]',
-    'div[contenteditable="true"][aria-label*="message" i]',
-    'div[contenteditable="true"][aria-label*="chat" i]',
-    'div[contenteditable="true"]',
-    'textarea[placeholder*="Send a message"]',
-    'textarea[placeholder*="message" i]',
-    'input[placeholder*="Send a message"]',
-    'input[placeholder*="message" i]',
-    '.chat-input',
-    '#message-input',
-    '[role="textbox"]',
-]
-
-SEND_BUTTON_SELECTORS = [
-    '[data-testid="send-message-button"]',
-    'button[aria-label="Send message"]',
-    'button[type="submit"]',
-]
 
 
 class BotWorker:
@@ -47,13 +22,8 @@ class BotWorker:
 
         self._thread: threading.Thread | None = None
         self._running = False
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
-        self._page1 = None  # Main channel page (kept open for streaming)
+        self._browser_session = None
         self._chat_target = "popout"
-        self._chat_page = None
         self._lock = threading.Lock()
         self._send_queue: list[str] = []
         self._queue_event = threading.Event()
@@ -101,91 +71,34 @@ class BotWorker:
     def _run(self, channel: str):
         channel_url = f"https://kick.com/{channel}"
         popout_url = f"https://kick.com/popout/{channel}/chat"
-        state_path = get_session_path(self.account_name)
-        pw_proxy = get_proxy(self.account_name)
 
         try:
-            with sync_playwright() as p:
-                self._playwright = p
-                self._browser = p.chromium.launch(
-                    channel="chrome",
-                    headless=self._headless,
-                    args=[
-                        "--start-maximized",
-                        "--disable-blink-features=AutomationControlled",
-                        "--disable-dev-shm-usage",
-                        "--disable-gpu",
-                        "--no-first-run",
-                        "--no-default-browser-check",
-                        "--disable-extensions",
-                    ],
-                    proxy=pw_proxy if pw_proxy else None
-                )
-                self._context = self._browser.new_context(
-                    storage_state=str(state_path) if state_path.exists() else None,
-                    viewport=None,
-                )
-                
-                # Open only selected destination
-                if self._chat_target == "channel":
-                    self._log(f"Opening {channel_url}")
-                    self._page1 = self._context.new_page()
-                    self._page1.goto(channel_url, wait_until="domcontentloaded", timeout=30_000)
-                    try:
-                        self._page1.wait_for_load_state("networkidle", timeout=15_000)
-                    except Exception:
-                        pass
+            browser_manager = get_shared_browser_manager(headless=self._headless)
 
-                    # Keep stream light while counting view
-                    try:
-                        self._page1.evaluate("""
-                            () => {
-                                document.querySelectorAll('video, audio').forEach(el => {
-                                    el.muted = true;
-                                    el.volume = 0;
-                                });
-                            }
-                        """)
-                    except Exception:
-                        pass
-                    self._chat_page = self._page1
-                else:
-                    self._log(f"Opening {popout_url}")
-                    self._page = self._context.new_page()
-                    self._page.goto(popout_url, wait_until="domcontentloaded", timeout=30_000)
-                    try:
-                        self._page.wait_for_load_state("networkidle", timeout=15_000)
-                    except Exception:
-                        pass
-                    self._chat_page = self._page
+            self._log(f"Opening {channel_url if self._chat_target == 'channel' else popout_url}")
+            self._browser_session = browser_manager.open_session(
+                account_name=self.account_name,
+                channel=channel,
+                chat_target=self._chat_target,
+            )
 
-                # Wait for chat input to appear
-                input_el = self._find_chat_input()
-                if input_el:
-                    self.status = "ready"
-                    self._log(f"Chat ready on {self._chat_target}.")
-                else:
-                    self.status = "error"
-                    error_url = channel_url if self._chat_target == "channel" else popout_url
-                    self.last_error = self._build_chat_input_error(error_url)
-                    self._log(f"ERROR: {self.last_error}")
-                    return
+            self.status = "ready"
+            self._log(f"Chat ready on {self._chat_target}.")
 
-                # Main loop: wait for messages to send
-                while self._running:
-                    self._queue_event.wait(timeout=1.0)
-                    self._queue_event.clear()
+            while self._running:
+                self._queue_event.wait(timeout=1.0)
+                self._queue_event.clear()
 
-                    while True:
-                        with self._lock:
-                            if not self._send_queue:
-                                break
-                            text = self._send_queue.pop(0)
-
-                        if not self._running:
+                while True:
+                    with self._lock:
+                        if not self._send_queue:
                             break
+                        text = self._send_queue.pop(0)
 
-                        self._send_to_chat(text)
+                    if not self._running:
+                        break
+
+                    self._send_to_chat(text)
 
         except Exception as e:
             self.status = "error"
@@ -193,79 +106,11 @@ class BotWorker:
             self._log(f"ERROR: {e}")
         finally:
             try:
-                # Close both pages first
-                if self._page:
-                    try:
-                        self._page.close()
-                    except Exception:
-                        pass
-                    self._page = None
-                
-                if self._page1:
-                    try:
-                        self._page1.close()
-                    except Exception:
-                        pass
-                    self._page1 = None
-                self._chat_page = None
-                
-                if self._context:
-                    self._context.close()
-                    self._context = None
-                    
-                if self._browser:
-                    self._browser.close()
-                    self._browser = None
-                    
-                self._playwright = None
+                if self._browser_session:
+                    self._browser_session.close()
+                    self._browser_session = None
             except Exception:
                 pass
-
-    def _find_chat_input(self):
-        """Try multiple selectors to find the chat input element."""
-        if not self._chat_page:
-            return None
-
-        search_roots = [self._chat_page]
-        try:
-            search_roots.extend(self._chat_page.frames)
-        except Exception:
-            pass
-
-        for root in search_roots:
-            for selector in CHAT_INPUT_SELECTORS:
-                try:
-                    el = root.wait_for_selector(selector, timeout=5_000)
-                    if el:
-                        return el
-                except PlaywrightTimeout:
-                    continue
-                except Exception:
-                    continue
-        return None
-
-    def _build_chat_input_error(self, url: str) -> str:
-        """Collect lightweight diagnostics when the chat input cannot be located."""
-        try:
-            title = self._chat_page.title() if self._chat_page else "<unknown>"
-        except Exception:
-            title = "<unknown>"
-
-        try:
-            frame_count = len(self._chat_page.frames) if self._chat_page else -1
-        except Exception:
-            frame_count = -1
-
-        try:
-            body_text = self._chat_page.locator("body").inner_text(timeout=2_000) if self._chat_page else ""
-        except Exception:
-            body_text = ""
-
-        body_preview = " ".join(body_text.split())[:200]
-        return (
-            "Could not find chat input on page. "
-            f"url={url} title={title!r} frames={frame_count} body={body_preview!r}"
-        )
 
     def _send_to_chat(self, text: str):
         """Type and send a message in the chat input."""
@@ -276,26 +121,12 @@ class BotWorker:
                 self.status = "ready"
                 return
 
-            input_el = self._find_chat_input()
-            if not input_el:
-                self._log("Chat input not found, skipping message.")
+            if not self._browser_session:
+                self._log("Chat session not ready, skipping message.")
                 self.status = "ready"
                 return
 
-            input_el.click()
-            time.sleep(0.2)
-
-            # Clear any existing text
-            input_el.fill("")
-            time.sleep(0.1)
-
-            # Type the message
-            input_el.type(text, delay=30)
-            time.sleep(0.15)
-
-            # Try pressing Enter first
-            input_el.press("Enter")
-            time.sleep(0.5)
+            self._browser_session.send_message(text)
 
             self._log(f"Sent: {text[:60]}{'...' if len(text) > 60 else ''}")
             self.status = "ready"

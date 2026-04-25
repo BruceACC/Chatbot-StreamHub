@@ -13,11 +13,8 @@ import time
 from core.session_manager import load_accounts, add_account, delete_account, has_session
 from core.bot_worker import BotWorker
 from core.spam_engine import SpamEngine, SpamConfig, SpamMode
-<<<<<<< Updated upstream
-=======
 from core.browser_manager import shutdown_shared_browser_manager
 from core.hls_capture import capture_hls_snapshot
->>>>>>> Stashed changes
 from core.message_pool import MessagePool
 from core.ollama_client import generate_ollama_response, truncate_chat_text_ignoring_emotes
 from core.audio_transcriber import LiveAudioTranscriber
@@ -162,6 +159,8 @@ class MainWindow(ctk.CTk):
         )
         self.bot_control.grid(row=0, column=2, sticky="nsew", padx=(4, 8), pady=8)
 
+        self.bot_control.set_on_refresh(self._on_refresh_config)
+
         self._refresh_stt_devices()
 
     def _get_target_ai_response_count(self) -> int:
@@ -231,9 +230,6 @@ class MainWindow(ctk.CTk):
                 else:
                     variant_prompt = prompt
 
-<<<<<<< Updated upstream
-                answer = generate_ollama_response(variant_prompt, model=model, max_chars=max_chars)
-=======
                 emote_only = random.random() < 0.30
                 answer = generate_ollama_response(
                     variant_prompt,
@@ -242,7 +238,6 @@ class MainWindow(ctk.CTk):
                     emote_only=emote_only,
                     image_base64=image_base64,
                 )
->>>>>>> Stashed changes
                 answers.append(truncate_chat_text_ignoring_emotes(answer, max_chars))
 
             self.after(0, lambda: self._on_ai_success(answers, model, max_chars))
@@ -507,9 +502,6 @@ class MainWindow(ctk.CTk):
     def _ask_ollama_for_transcribed(self, prompt: str, model: str, source: str):
         try:
             max_chars = self.message_editor.get_ai_max_chars()
-<<<<<<< Updated upstream
-            answer = generate_ollama_response(prompt, model=model, max_chars=max_chars)
-=======
             emote_only = random.random() < 0.25
             answer = generate_ollama_response(
                 prompt,
@@ -518,7 +510,6 @@ class MainWindow(ctk.CTk):
                 emote_only=emote_only,
                 image_base64=self._latest_capture_image_b64 or None,
             )
->>>>>>> Stashed changes
             self.after(0, lambda: self._on_auto_streaming_response(answer, model, source, prompt, max_chars))
         except Exception as e:
             self.after(0, lambda: self.bot_control.log(f"⚠ Error IA automática: {e}"))
@@ -651,8 +642,6 @@ class MainWindow(ctk.CTk):
         for name in load_accounts():
             self.account_panel.set_status(name["name"], "idle")
 
-<<<<<<< Updated upstream
-=======
     def _on_refresh_config(self):
         """Refresh config without stopping engine."""
         if not self._engine_running:
@@ -669,7 +658,6 @@ class MainWindow(ctk.CTk):
         if self.message_editor.is_stt_running():
             self._schedule_auto_ai_request_range(cfg.delay_min, cfg.delay_max)
 
->>>>>>> Stashed changes
     def _stop_workers(self):
         for worker in self._workers.values():
             worker.stop()
@@ -701,6 +689,10 @@ class MainWindow(ctk.CTk):
 
     def _on_close(self):
         try:
-            self._stop_transcriber()
+            self._on_stop()
         finally:
-            self.destroy()
+            try:
+                self._stop_transcriber()
+            finally:
+                shutdown_shared_browser_manager()
+                self.destroy()
