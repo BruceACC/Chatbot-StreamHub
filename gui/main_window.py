@@ -313,7 +313,6 @@ class MainWindow(ctk.CTk):
         if self._transcriber is not None:
             self._transcriber.stop()
         self.message_editor.set_stt_running(False)
-        self.message_editor.clear_cycle_timing()
         self.vision_panel.reset()
         self.bot_control.log("[Whisper] Transcripcion detenida.")
 
@@ -363,7 +362,6 @@ class MainWindow(ctk.CTk):
         self._auto_ai_delay_s = t_s
 
         self.vision_panel.set_cycle(self._auto_ai_cycle_index, t_s, t_half_s, t_minus_5_s)
-        self.message_editor.set_cycle_timing(t_s, t_half_s, t_minus_5_s)
         self.bot_control.log(
             f"[Vision HLS] Ciclo #{self._auto_ai_cycle_index}: T={t_s:.1f}s | T/2={t_half_s:.1f}s | T-5={t_minus_5_s:.1f}s"
         )
@@ -424,7 +422,7 @@ class MainWindow(ctk.CTk):
         if not self._engine_running or not self.message_editor.is_stt_running():
             return
 
-        self.message_editor.set_cycle_info(
+        self.vision_panel.set_cycle_info(
             f"Ciclo IA -> T-5 alcanzado: la IA responde ahora (T={self._auto_ai_cycle_t_s:.1f}s)."
         )
 
@@ -624,7 +622,6 @@ class MainWindow(ctk.CTk):
         self._stop_workers()
         self._engine_running = False
         self._latest_capture_image_b64 = ""
-        self.message_editor.clear_cycle_timing()
         self.vision_panel.reset()
         self.bot_control.set_running(False)
         self.bot_control.log("■ Bots detenidos satisfactoriamente.")

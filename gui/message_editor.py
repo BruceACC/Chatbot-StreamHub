@@ -57,15 +57,6 @@ class MessageEditor(ctk.CTkFrame):
             text_color=C_MUTED
         ).pack(anchor="w", padx=14, pady=(0, 6))
 
-        self._cycle_info_lbl = ctk.CTkLabel(
-            self,
-            text="Ciclo IA: inactivo",
-            font=ctk.CTkFont("Segoe UI", 11, "bold"),
-            text_color="#9fb6ff",
-            justify="left",
-        )
-        self._cycle_info_lbl.pack(anchor="w", padx=14, pady=(0, 8))
-
         # Whisper transcription controls (compact and visible)
         stt_box = ctk.CTkFrame(self, fg_color="#191924", corner_radius=10)
         stt_box.pack(fill="x", padx=12, pady=(0, 8))
@@ -455,17 +446,3 @@ class MessageEditor(ctk.CTkFrame):
             value = 60
         return max(1, min(500, value))
 
-    def set_cycle_timing(self, t_s: float, t_half_s: float, t_minus_5_s: float):
-        self._cycle_info_lbl.configure(
-            text=(
-                f"Ciclo IA -> T={t_s:.1f}s (envio chat) | "
-                f"T/2={t_half_s:.1f}s (captura) | "
-                f"T-5={t_minus_5_s:.1f}s (respuesta IA)"
-            )
-        )
-
-    def set_cycle_info(self, text: str):
-        self._cycle_info_lbl.configure(text=text)
-
-    def clear_cycle_timing(self):
-        self._cycle_info_lbl.configure(text="Ciclo IA: inactivo")
