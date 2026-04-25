@@ -488,17 +488,6 @@ class MainWindow(ctk.CTk):
         self.after(0, lambda: self.message_editor.append_ai_input(line))
         self.after(0, lambda: self.bot_control.log(f"[Whisper] {line}"))
 
-        if self.message_editor.is_auto_streaming():
-            model = self.message_editor.get_ai_model()
-            self.bot_control.log(f"[Whisper] Pregunta: {text}")
-            self.bot_control.log(f"[Whisper] Consultando IA automáticamente...")
-            thread = threading.Thread(
-                target=self._ask_ollama_for_transcribed,
-                args=(text, model, source),
-                daemon=True,
-            )
-            thread.start()
-
     def _ask_ollama_for_transcribed(self, prompt: str, model: str, source: str):
         try:
             max_chars = self.message_editor.get_ai_max_chars()

@@ -9,8 +9,9 @@ C_PANEL   = "#16161e"
 C_SURFACE = "#1e1e2a"
 C_ACCENT  = "#53fc18"
 C_TEXT    = "#e0e0e0"
-C_MUTED   = "#888"
+C_MUTED   = "#e0e0e0"
 C_BORDER  = "#2a2a38"
+MSG_BOX_BASE_HEIGHT = 10
 
 
 class MessageEditor(ctk.CTkFrame):
@@ -151,57 +152,105 @@ class MessageEditor(ctk.CTkFrame):
         )
         self._save_txt_btn.grid(row=2, column=0, sticky="w", padx=(10, 0), pady=(0, 10))
 
-        self._auto_mode_var = ctk.BooleanVar(value=False)
-        self._auto_mode_check = ctk.CTkCheckBox(
-            stt_box,
-            text="Modo Auto Streaming",
-            variable=self._auto_mode_var,
-            font=ctk.CTkFont("Segoe UI", 11, "bold"),
+        txt_tools_row = ctk.CTkFrame(stt_box, fg_color="transparent")
+        txt_tools_row.grid(row=2, column=1, columnspan=4, sticky="w", padx=(8, 0), pady=(0, 10))
+
+        ctk.CTkButton(
+            txt_tools_row,
+            text="📄 Cargar desde .txt",
+            width=150,
+            height=28,
+            fg_color=C_SURFACE,
+            hover_color="#25253a",
             text_color=C_TEXT,
-            fg_color="#256c2c",
-            hover_color="#1e5523",
-            checkmark_color="#000",
+            corner_radius=6,
+            font=ctk.CTkFont("Segoe UI", 11, "bold"),
+            command=self._load_file,
+        ).pack(side="left", padx=(0, 6))
+
+        ctk.CTkButton(
+            txt_tools_row,
+            text="🗑 Limpiar",
+            width=94,
+            height=28,
+            fg_color="#2a1a1a",
+            hover_color="#3d1a1a",
+            text_color="#ff6666",
+            corner_radius=6,
+            font=ctk.CTkFont("Segoe UI", 11, "bold"),
+            command=self._clear,
+        ).pack(side="left", padx=(0, 10))
+
+        ctk.CTkLabel(
+            txt_tools_row,
+            text="Prefijo:",
+            font=ctk.CTkFont("Segoe UI", 11, "bold"),
+            text_color=C_MUTED,
+        ).pack(side="left", padx=(0, 6))
+
+        self._prefix_entry = ctk.CTkEntry(
+            txt_tools_row,
+            width=82,
+            height=28,
+            corner_radius=6,
+            fg_color=C_SURFACE,
+            border_color=C_BORDER,
+            text_color=C_TEXT,
+            placeholder_text="!tts",
         )
-        self._auto_mode_check.grid(row=2, column=1, columnspan=2, sticky="w", padx=(0, 0), pady=(0, 10))
+        self._prefix_entry.pack(side="left", padx=(0, 10))
+        self._prefix_entry.insert(0, "!tts")
+
+        ctk.CTkLabel(
+            txt_tools_row,
+            text="Max:",
+            font=ctk.CTkFont("Segoe UI", 11, "bold"),
+            text_color=C_MUTED,
+        ).pack(side="left", padx=(0, 6))
+
+        self._max_chars_entry = ctk.CTkEntry(
+            txt_tools_row,
+            width=35,
+            height=28,
+            corner_radius=6,
+            fg_color=C_SURFACE,
+            border_color=C_BORDER,
+            text_color=C_TEXT,
+            placeholder_text="60",
+        )
+        self._max_chars_entry.pack(side="left")
+        self._max_chars_entry.insert(0, "60")
 
         # Text area
         self._textbox = ctk.CTkTextbox(
             self,
+            height=MSG_BOX_BASE_HEIGHT,
             fg_color=C_SURFACE,
             border_color=C_BORDER,
             border_width=1,
             text_color=C_TEXT,
             font=ctk.CTkFont("Consolas", 13),
-            wrap="word",
+            wrap="none",
             corner_radius=8,
         )
         self._textbox.pack(fill="both", expand=True, padx=12, pady=(0, 6))
         self._textbox.bind("<KeyRelease>", self._update_count)
+        self._textbox.bind("<FocusIn>", self._update_textbox_placeholder)
+        self._textbox.bind("<FocusOut>", self._update_textbox_placeholder)
 
-        # Action row
-        btn_row = ctk.CTkFrame(self, fg_color="transparent")
-        btn_row.pack(fill="x", padx=12, pady=(0, 12))
-
-        ctk.CTkButton(
-            btn_row, text="🗑 Limpiar",
-            width=90, height=32,
-            fg_color="#2a1a1a", hover_color="#3d1a1a",
-            text_color="#ff6666", corner_radius=6, font=ctk.CTkFont("Segoe UI", 12, "bold"),
-            command=self._clear,
-        ).pack(side="right", padx=(4, 0))
-
-        ctk.CTkButton(
-            btn_row, text="📄 Cargar desde .txt",
-            width=140, height=32,
-            fg_color=C_SURFACE, hover_color="#25253a",
-            text_color=C_TEXT, corner_radius=6, font=ctk.CTkFont("Segoe UI", 12, "bold"),
-            command=self._load_file,
-        ).pack(side="right", padx=4)
+        self._textbox_placeholder = ctk.CTkLabel(
+            self,
+            text="Las respuestas se muestran aqui...",
+            font=ctk.CTkFont("Segoe UI", 12, slant="italic"),
+            text_color=C_MUTED,
+            fg_color=C_SURFACE,
+        )
+        self._textbox_placeholder.place(in_=self._textbox, x=12, y=10, anchor="nw")
 
         # AI row
         ai_row = ctk.CTkFrame(self, fg_color="transparent")
         ai_row.pack(fill="x", padx=12, pady=(0, 12))
-        ai_row.columnconfigure(1, weight=1)
+        ai_row.columnconfigure(2, weight=1)
 
         ctk.CTkLabel(
             ai_row,
@@ -222,45 +271,6 @@ class MessageEditor(ctk.CTkFrame):
         self._model_entry.grid(row=0, column=1, sticky="w", pady=(0, 6))
         self._model_entry.insert(0, "qwen2.5vl:7b-q4_K_M")
 
-        ctk.CTkLabel(
-            ai_row,
-            text="Prefijo:",
-            font=ctk.CTkFont("Segoe UI", 11, "bold"),
-            text_color=C_MUTED,
-        ).grid(row=0, column=2, sticky="e", padx=(12, 6), pady=(0, 6))
-
-        self._prefix_entry = ctk.CTkEntry(
-            ai_row,
-            width=120,
-            height=30,
-            corner_radius=6,
-            fg_color=C_SURFACE,
-            border_color=C_BORDER,
-            text_color=C_TEXT,
-            placeholder_text="!tts",
-        )
-        self._prefix_entry.grid(row=0, column=3, sticky="w", pady=(0, 6))
-
-        ctk.CTkLabel(
-            ai_row,
-            text="Max:",
-            font=ctk.CTkFont("Segoe UI", 11, "bold"),
-            text_color=C_MUTED,
-        ).grid(row=0, column=4, sticky="e", padx=(12, 6), pady=(0, 6))
-
-        self._max_chars_entry = ctk.CTkEntry(
-            ai_row,
-            width=72,
-            height=30,
-            corner_radius=6,
-            fg_color=C_SURFACE,
-            border_color=C_BORDER,
-            text_color=C_TEXT,
-            placeholder_text="60",
-        )
-        self._max_chars_entry.grid(row=0, column=5, sticky="w", pady=(0, 6))
-        self._max_chars_entry.insert(0, "60")
-
         self._ai_input = ctk.CTkEntry(
             ai_row,
             height=34,
@@ -270,7 +280,7 @@ class MessageEditor(ctk.CTkFrame):
             border_color=C_BORDER,
             text_color=C_TEXT,
         )
-        self._ai_input.grid(row=1, column=0, columnspan=2, sticky="ew", padx=(0, 8))
+        self._ai_input.grid(row=0, column=2, sticky="ew", padx=(12, 8), pady=(0, 6))
         self._ai_input.bind("<Return>", self._ask_ai)
 
         self._ask_ai_btn = ctk.CTkButton(
@@ -285,9 +295,10 @@ class MessageEditor(ctk.CTkFrame):
             font=ctk.CTkFont("Segoe UI", 12, "bold"),
             command=self._ask_ai,
         )
-        self._ask_ai_btn.grid(row=1, column=2, sticky="e")
+        self._ask_ai_btn.grid(row=0, column=3, sticky="e", pady=(0, 6))
 
         self._stt_running = False
+        self._update_textbox_placeholder()
 
     def _ask_ai(self, event=None):
         prompt = self._ai_input.get().strip()
@@ -338,8 +349,16 @@ class MessageEditor(ctk.CTkFrame):
         self._line_count_lbl.configure(
             text=f"{len(lines)} mensaje{'s' if len(lines) != 1 else ''}"
         )
+        self._update_textbox_placeholder()
         if self.on_change:
             self.on_change(text)
+
+    def _update_textbox_placeholder(self, event=None):
+        has_text = bool(self._textbox.get("1.0", "end-1c").strip())
+        if has_text:
+            self._textbox_placeholder.place_forget()
+            return
+        self._textbox_placeholder.place(in_=self._textbox, x=12, y=10, anchor="nw")
 
     def _clear(self):
         self._textbox.delete("1.0", "end")
@@ -418,9 +437,6 @@ class MessageEditor(ctk.CTkFrame):
 
         cable_match = next((d for d in values if "cable output" in d.lower()), None)
         self._stt_device_combo.set(cable_match or values[0])
-
-    def is_auto_streaming(self) -> bool:
-        return self._auto_mode_var.get()
 
     def is_stt_running(self) -> bool:
         return self._stt_running

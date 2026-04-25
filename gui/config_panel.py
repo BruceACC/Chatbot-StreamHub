@@ -176,7 +176,7 @@ class ConfigPanel(ctk.CTkFrame):
         self._group_entry = ctk.CTkEntry(
             self._extra_row, textvariable=self._group_var,
             fg_color=C_SURFACE, border_color=C_BORDER,
-            text_color=C_TEXT, height=34, width=60,
+            text_color=C_TEXT, height=34, width=40,
         )
         self._group_entry.grid(row=0, column=5, padx=4, sticky="w")
 
