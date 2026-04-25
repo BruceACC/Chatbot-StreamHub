@@ -141,7 +141,7 @@ class ConfigPanel(ctk.CTkFrame):
             text_color=C_MUTED, width=80, anchor="e"
         ).grid(row=0, column=0, sticky="e")
 
-        self._delay_min_var = ctk.StringVar(value="3")
+        self._delay_min_var = ctk.StringVar(value="40")
         self._delay_min_entry = ctk.CTkEntry(
             self._extra_row, textvariable=self._delay_min_var,
             fg_color=C_SURFACE, border_color=C_BORDER,
@@ -157,7 +157,7 @@ class ConfigPanel(ctk.CTkFrame):
         )
         self._delay_sep_lbl.grid(row=0, column=2, padx=(2, 2), sticky="w")
 
-        self._delay_max_var = ctk.StringVar(value="5")
+        self._delay_max_var = ctk.StringVar(value="120")
         self._delay_max_entry = ctk.CTkEntry(
             self._extra_row, textvariable=self._delay_max_var,
             fg_color=C_SURFACE, border_color=C_BORDER,

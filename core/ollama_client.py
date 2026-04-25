@@ -19,20 +19,23 @@ Usa estos emotes de Kick cuando aporten a la reaccion y sin forzar.
 Formato exacto permitido: [emote:ID:NOMBRE]
 
 Asombro sorpresa wow:
-[emote:37233:PogU] [emote:37229:OOOO] [emote:39261:kkHuh] [emote:37240:WeirdChamp]
+[emote:37233:PogU] [emote:37229:OOOO] [emote:39261:kkHuh]
 
 Risa vacilon meme:
 [emote:37226:KEKW] [emote:37227:LULW] [emote:37225:KEKLEO] [emote:37243:gachiGASM] [emote:37215:AYAYA]
 
 Aprobacion apoyo felicitacion:
-[emote:37218:Clap] [emote:37232:PeepoClap] [emote:4147873:YouTried] [emote:28633:SenpaiWhoo] [emote:37221:EZ] [emote:37237:TriKool]
+[emote:37218:Clap] [emote:37232:PeepoClap] [emote:4147873:YouTried] [emote:28633:SenpaiWhoo] [emote:37221:EZ] [emote:37237:TriKool] [emote:4148085:SUSSY]
 
 Baile musica energia:
 [emote:4147884:vibePls] [emote:5380973:shoulderRoll] [emote:4055796:ODAJAM] [emote:37245:peepoDJ] [emote:39260:DanceDance]
 [emote:4147914:duckPls] [emote:4148144:catblobDance] [emote:39265:EDMusiC] [emote:39251:beeBobble] [emote:3753119:asmonSmash]
 
 Duda sospecha confusion:
-[emote:4148085:SUSSY] [emote:37244:modCheck] [emote:305040:Kappa] [emote:37239:WeSmart] [emote:39275:peepoShy]
+[emote:37244:modCheck] [emote:305040:Kappa] [emote:37239:WeSmart] [emote:39275:peepoShy] 
+
+Enamorado:
+[emote:37240:WeirdChamp]
 
 Tristeza presion frustracion:
 [emote:4148081:Sadge] [emote:4148128:mericCat] [emote:37236:ThisIsFine] [emote:39254:CaptFail] [emote:5273247:highCortisol] [emote:5273243:lowCortisol]
@@ -42,6 +45,21 @@ Reaccion fuerte caos toxicidad meme:
 
 Cariño respeto fe presencia:
 [emote:39402:Flowie] [emote:4147900:catKISS] [emote:37234:Prayge] [emote:37248:ratJAM] [emote:4147902:KEKBye] [emote:3645849:TRUEING]
+
+Enojo:
+[emote:37228:NODDERS] [emote:3645850:EDDIE] 
+
+locuaz:
+[emote:37217:Bwop] 
+
+Mateado:
+[emote:39273:MuteD]
+
+Muerto Fallecera:
+[emote:4147909:coffinPls] 
+
+Atraso Retraso Tarde:
+[emote:4147869:SaltT]
 
 Otros de estilo chat del canal:
 [emote:37228:NODDERS] [emote:37217:Bwop] [emote:39273:MuteD] [emote:4147909:coffinPls] [emote:3645850:EDDIE] [emote:4147869:SaltT]
@@ -85,7 +103,39 @@ def truncate_chat_text_ignoring_emotes(text: str, max_chars: int) -> str:
     return "".join(out).strip()
 
 
+<<<<<<< Updated upstream
 def generate_ollama_response(prompt: str, model: str = "llama3", max_chars: int = 500) -> str:
+=======
+def strip_unicode_emojis(text: str) -> str:
+    """Remove unicode emojis while preserving regular text and Kick emote tokens."""
+    if not text:
+        return ""
+
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        token_match = EMOTE_TOKEN_RE.match(text, i)
+        if token_match:
+            out.append(token_match.group(0))
+            i = token_match.end()
+            continue
+
+        ch = text[i]
+        if not _is_emoji_char(ch):
+            out.append(ch)
+        i += 1
+
+    return "".join(out)
+
+
+def generate_ollama_response(
+    prompt: str,
+    model: str = "llama3",
+    max_chars: int = 500,
+    emote_only: bool = False,
+    image_base64: str | None = None,
+) -> str:
+>>>>>>> Stashed changes
     if not prompt.strip():
         raise ValueError("El prompt de IA no puede estar vacio.")
 
@@ -117,6 +167,9 @@ Responde de forma casual, natural y corta como lo haría una persona mirando la 
             "temperature": 0.7,
         },
     }
+
+    if image_base64:
+        payload["images"] = [image_base64]
 
     endpoint = f"{DEFAULT_OLLAMA_URL.rstrip('/')}/api/generate"
     req = urllib.request.Request(

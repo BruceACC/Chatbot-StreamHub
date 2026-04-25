@@ -8,15 +8,22 @@ import customtkinter as ctk
 import threading
 import logging
 import random
+import time
 
 from core.session_manager import load_accounts, add_account, delete_account, has_session
 from core.bot_worker import BotWorker
 from core.spam_engine import SpamEngine, SpamConfig, SpamMode
+<<<<<<< Updated upstream
+=======
+from core.browser_manager import shutdown_shared_browser_manager
+from core.hls_capture import capture_hls_snapshot
+>>>>>>> Stashed changes
 from core.message_pool import MessagePool
 from core.ollama_client import generate_ollama_response, truncate_chat_text_ignoring_emotes
 from core.audio_transcriber import LiveAudioTranscriber
 from gui.account_panel import AccountPanel
 from gui.config_panel import ConfigPanel
+from gui.vision_panel import VisionPanel
 from gui.message_editor import MessageEditor
 from gui.bot_control import BotControl
 
@@ -59,12 +66,20 @@ class MainWindow(ctk.CTk):
         self._stt_clear_job_id = None
         self._stt_clear_ms = 2 * 60 * 1000
         self._auto_ai_job_id = None
-        self._auto_ai_delay_s = 3.0
-        self._auto_ai_delay_min_s = 3.0
-        self._auto_ai_delay_max_s = 3.0
+        self._auto_ai_capture_job_id = None
+        self._auto_ai_cycle_end_job_id = None
+        self._auto_ai_delay_s = 120.0
+        self._auto_ai_delay_min_s = 40.0
+        self._auto_ai_delay_max_s = 120.0
+        self._auto_ai_cycle_index = 0
+        self._auto_ai_cycle_t_s = 0.0
         self._ai_request_inflight = False
+        self._ai_request_started_at = 0.0
+        self._ai_request_timeout_s = 180.0
         self._auto_ai_empty_logged = False
         self._auto_ai_busy_logged = False
+        self._capture_inflight = False
+        self._latest_capture_image_b64 = ""
         self._poll_status_job_id = None
 
         self._build_ui()
@@ -116,8 +131,17 @@ class MainWindow(ctk.CTk):
         center.rowconfigure(1, weight=1)
         center.columnconfigure(0, weight=1)
 
-        self.config_panel = ConfigPanel(center, fg_color=C_PANEL)
-        self.config_panel.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        top_row = ctk.CTkFrame(center, fg_color=C_BG, corner_radius=0)
+        top_row.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        top_row.columnconfigure(0, weight=1)
+        top_row.columnconfigure(1, weight=0)
+
+        self.config_panel = ConfigPanel(top_row, fg_color=C_PANEL)
+        self.config_panel.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+
+        self.vision_panel = VisionPanel(top_row, fg_color=C_PANEL, width=350)
+        self.vision_panel.grid(row=0, column=1, sticky="ns")
+        self.vision_panel.grid_propagate(False)
 
         self.message_editor = MessageEditor(
             center,
@@ -140,13 +164,38 @@ class MainWindow(ctk.CTk):
 
         self._refresh_stt_devices()
 
+    def _get_target_ai_response_count(self) -> int:
+        cfg = self.config_panel.get_spam_config()
+
+        if self._workers:
+            account_count = len(self._workers)
+        else:
+            account_count = len(load_accounts())
+
+        account_count = max(1, account_count)
+
+        if cfg.mode == SpamMode.SIMULTANEOUS:
+            return account_count
+        if cfg.mode == SpamMode.DEFERRED:
+            return 1
+        if cfg.mode == SpamMode.GROUPED:
+            return max(1, min(account_count, int(cfg.group_size)))
+        return account_count
+
     def _on_message_changed(self, text: str):
         self._pool.set_text(text)
 
-    def _on_ai_request(self, prompt: str, model: str):
+    def _on_ai_request(
+        self,
+        prompt: str,
+        model: str,
+        image_base64: str | None = None,
+        response_count_override: int | None = None,
+    ):
         self._ai_request_inflight = True
-        account_count = max(1, len(load_accounts()))
-        response_count = account_count
+        self._ai_request_started_at = time.monotonic()
+        default_count = self._get_target_ai_response_count()
+        response_count = max(1, int(response_count_override)) if response_count_override is not None else default_count
         max_chars = self.message_editor.get_ai_max_chars()
 
         self.bot_control.log(f"🤖 Consultando IA ({model})...")
@@ -156,12 +205,19 @@ class MainWindow(ctk.CTk):
             )
         thread = threading.Thread(
             target=self._ask_ollama_thread,
-            args=(prompt, model, response_count, max_chars),
+            args=(prompt, model, response_count, max_chars, image_base64),
             daemon=True,
         )
         thread.start()
 
-    def _ask_ollama_thread(self, prompt: str, model: str, response_count: int = 1, max_chars: int = 500):
+    def _ask_ollama_thread(
+        self,
+        prompt: str,
+        model: str,
+        response_count: int = 1,
+        max_chars: int = 500,
+        image_base64: str | None = None,
+    ):
         try:
             answers: list[str] = []
             total = max(1, int(response_count))
@@ -175,7 +231,18 @@ class MainWindow(ctk.CTk):
                 else:
                     variant_prompt = prompt
 
+<<<<<<< Updated upstream
                 answer = generate_ollama_response(variant_prompt, model=model, max_chars=max_chars)
+=======
+                emote_only = random.random() < 0.30
+                answer = generate_ollama_response(
+                    variant_prompt,
+                    model=model,
+                    max_chars=max_chars,
+                    emote_only=emote_only,
+                    image_base64=image_base64,
+                )
+>>>>>>> Stashed changes
                 answers.append(truncate_chat_text_ignoring_emotes(answer, max_chars))
 
             self.after(0, lambda: self._on_ai_success(answers, model, max_chars))
@@ -198,12 +265,14 @@ class MainWindow(ctk.CTk):
             self.bot_control.log(f"🤖 {len(safe_answers)} respuestas recibidas de {model}.")
         self.message_editor.set_ai_busy(False)
         self._ai_request_inflight = False
+        self._ai_request_started_at = 0.0
         self._auto_ai_busy_logged = False
 
     def _on_ai_error(self, error: str):
         self.bot_control.log(f"⚠ Error IA: {error}")
         self.message_editor.set_ai_busy(False)
         self._ai_request_inflight = False
+        self._ai_request_started_at = 0.0
         self._auto_ai_busy_logged = False
 
     def _on_stt_toggle(self, should_start: bool, device_hint: str, model_size: str):
@@ -249,60 +318,155 @@ class MainWindow(ctk.CTk):
         if self._transcriber is not None:
             self._transcriber.stop()
         self.message_editor.set_stt_running(False)
+        self.message_editor.clear_cycle_timing()
+        self.vision_panel.reset()
         self.bot_control.log("[Whisper] Transcripcion detenida.")
 
     def _schedule_auto_ai_request(self, delay_s: float):
-        self._cancel_auto_ai_request()
-        configured_delay = max(0.5, float(delay_s))
-        self._auto_ai_delay_s = max(0.5, configured_delay - 2.0)
-        self._auto_ai_job_id = self.after(int(self._auto_ai_delay_s * 1000), self._auto_ai_request_tick)
-        self.bot_control.log(
-            f"[Auto IA] Activo cada {self._auto_ai_delay_s:.1f}s (retraso configurado: {configured_delay:.1f}s)."
-        )
+        self._schedule_auto_ai_request_range(delay_s, delay_s)
 
     def _schedule_auto_ai_request_range(self, delay_min_s: float, delay_max_s: float):
         self._cancel_auto_ai_request()
-        low = max(0.5, min(float(delay_min_s), float(delay_max_s)) - 2.0)
-        high = max(0.5, max(float(delay_min_s), float(delay_max_s)) - 2.0)
+        low = max(0.5, min(float(delay_min_s), float(delay_max_s)))
+        high = max(0.5, max(float(delay_min_s), float(delay_max_s)))
         self._auto_ai_delay_min_s = low
         self._auto_ai_delay_max_s = high
-        self._auto_ai_delay_s = random.uniform(low, high)
-        self._auto_ai_job_id = self.after(int(self._auto_ai_delay_s * 1000), self._auto_ai_request_tick)
-        self.bot_control.log(
-            f"[Auto IA] Activo en rango aleatorio {low:.1f}s-{high:.1f}s."
-        )
+        self._auto_ai_cycle_index = 0
+        self._start_auto_ai_cycle()
 
     def _cancel_auto_ai_request(self):
-        if self._auto_ai_job_id is None:
+        for job_id_attr in ("_auto_ai_job_id", "_auto_ai_capture_job_id", "_auto_ai_cycle_end_job_id"):
+            job_id = getattr(self, job_id_attr, None)
+            if job_id is None:
+                continue
+            try:
+                self.after_cancel(job_id)
+            except Exception:
+                pass
+            setattr(self, job_id_attr, None)
+
+    def _pick_auto_ai_cycle_delay(self, low: float, high: float) -> float:
+        if abs(high - low) < 1e-9:
+            return low
+
+        low_i = int(low)
+        high_i = int(high)
+        if abs(low - low_i) < 1e-9 and abs(high - high_i) < 1e-9:
+            return float(random.randint(low_i, high_i))
+        return random.uniform(low, high)
+
+    def _start_auto_ai_cycle(self):
+        if not self._engine_running or not self.message_editor.is_stt_running():
             return
+
+        t_s = self._pick_auto_ai_cycle_delay(self._auto_ai_delay_min_s, self._auto_ai_delay_max_s)
+        t_half_s = t_s / 2.0
+        t_minus_5_s = max(0.5, t_s - 5.0)
+
+        self._auto_ai_cycle_index += 1
+        self._auto_ai_cycle_t_s = t_s
+        self._auto_ai_delay_s = t_s
+
+        self.vision_panel.set_cycle(self._auto_ai_cycle_index, t_s, t_half_s, t_minus_5_s)
+        self.message_editor.set_cycle_timing(t_s, t_half_s, t_minus_5_s)
+        self.bot_control.log(
+            f"[Vision HLS] Ciclo #{self._auto_ai_cycle_index}: T={t_s:.1f}s | T/2={t_half_s:.1f}s | T-5={t_minus_5_s:.1f}s"
+        )
+
+        self._auto_ai_capture_job_id = self.after(int(t_half_s * 1000), self._auto_ai_capture_tick)
+        self._auto_ai_job_id = self.after(int(t_minus_5_s * 1000), self._auto_ai_request_tick)
+        self._auto_ai_cycle_end_job_id = self.after(int(t_s * 1000), self._auto_ai_cycle_end_tick)
+
+    def _auto_ai_cycle_end_tick(self):
+        self._auto_ai_cycle_end_job_id = None
+        if not self._engine_running or not self.message_editor.is_stt_running():
+            return
+        self._start_auto_ai_cycle()
+
+    def _auto_ai_capture_tick(self):
+        self._auto_ai_capture_job_id = None
+        if not self._engine_running or not self.message_editor.is_stt_running():
+            return
+        if self._capture_inflight:
+            return
+
+        self._capture_inflight = True
+        cycle_index = self._auto_ai_cycle_index
+        self.bot_control.log(f"[Vision HLS] Captura en T/2 del ciclo #{cycle_index}...")
+
+        thread = threading.Thread(target=self._capture_hls_snapshot_thread, args=(cycle_index,), daemon=True)
+        thread.start()
+
+    def _capture_hls_snapshot_thread(self, cycle_index: int):
         try:
-            self.after_cancel(self._auto_ai_job_id)
-        except Exception:
-            pass
-        self._auto_ai_job_id = None
+            result = capture_hls_snapshot()
+        except Exception as exc:
+            result = {
+                "success": False,
+                "image_base64": "",
+                "url_used": "",
+                "results": [{"url": "(global)", "ok": False, "detail": str(exc)}],
+            }
+        self.after(0, lambda: self._on_capture_hls_done(cycle_index, result))
+
+    def _on_capture_hls_done(self, cycle_index: int, result: dict):
+        self._capture_inflight = False
+
+        if result.get("success"):
+            self._latest_capture_image_b64 = str(result.get("image_base64") or "")
+            img_size = len(self._latest_capture_image_b64) if self._latest_capture_image_b64 else 0
+            self.bot_control.log(
+                f"[Vision HLS] Captura OK en ciclo #{cycle_index} ({result.get('url_used', '')} - {img_size} bytes imagen base64)."
+            )
+        else:
+            self._latest_capture_image_b64 = ""
+            self.bot_control.log(f"[Vision HLS] Captura FALLIDA en ciclo #{cycle_index}.")
+
+        self.vision_panel.set_capture_result(result)
 
     def _auto_ai_request_tick(self):
         self._auto_ai_job_id = None
         if not self._engine_running or not self.message_editor.is_stt_running():
             return
 
+        self.message_editor.set_cycle_info(
+            f"Ciclo IA -> T-5 alcanzado: la IA responde ahora (T={self._auto_ai_cycle_t_s:.1f}s)."
+        )
+
         prompt = self.message_editor.get_ai_input()
         if not prompt:
             if not self._auto_ai_empty_logged:
-                self.bot_control.log("[Auto IA] Ciclo omitido: el campo de IA está vacío.")
+                self.bot_control.log("[Auto IA] Ciclo omitido: el campo de IA esta vacio.")
                 self._auto_ai_empty_logged = True
-        elif self._ai_request_inflight:
+            return
+
+        if self._ai_request_inflight and self._ai_request_started_at > 0:
+            elapsed = time.monotonic() - self._ai_request_started_at
+            if elapsed > self._ai_request_timeout_s:
+                self.bot_control.log(
+                    f"⚠ [Auto IA] Solicitud previa atascada por {elapsed:.0f}s; se libera el bloqueo para reintentar."
+                )
+                self._ai_request_inflight = False
+                self._ai_request_started_at = 0.0
+                self._auto_ai_busy_logged = False
+
+        if self._ai_request_inflight:
             if not self._auto_ai_busy_logged:
                 self.bot_control.log("[Auto IA] Esperando respuesta de IA anterior...")
                 self._auto_ai_busy_logged = True
-        else:
-            self._auto_ai_empty_logged = False
-            self._auto_ai_busy_logged = False
-            model = self.message_editor.get_ai_model()
-            self._on_ai_request(prompt, model)
+            return
 
-        self._auto_ai_delay_s = random.uniform(self._auto_ai_delay_min_s, self._auto_ai_delay_max_s)
-        self._auto_ai_job_id = self.after(int(self._auto_ai_delay_s * 1000), self._auto_ai_request_tick)
+        self._auto_ai_empty_logged = False
+        self._auto_ai_busy_logged = False
+        model = self.message_editor.get_ai_model()
+        
+        has_image = bool(self._latest_capture_image_b64 and len(self._latest_capture_image_b64) > 100)
+        if has_image:
+            self.bot_control.log(f"[Vision HLS] Enviando a IA: transcripcion ({len(prompt)} chars) + imagen ({len(self._latest_capture_image_b64)} bytes).")
+        else:
+            self.bot_control.log(f"[Vision HLS] Enviando a IA: transcripcion ({len(prompt)} chars) SOLO (sin imagen).")
+        
+        self._on_ai_request(prompt, model, image_base64=self._latest_capture_image_b64 or None)
 
     def _schedule_stt_ai_input_clear(self):
         self._cancel_stt_ai_input_clear()
@@ -343,7 +507,18 @@ class MainWindow(ctk.CTk):
     def _ask_ollama_for_transcribed(self, prompt: str, model: str, source: str):
         try:
             max_chars = self.message_editor.get_ai_max_chars()
+<<<<<<< Updated upstream
             answer = generate_ollama_response(prompt, model=model, max_chars=max_chars)
+=======
+            emote_only = random.random() < 0.25
+            answer = generate_ollama_response(
+                prompt,
+                model=model,
+                max_chars=max_chars,
+                emote_only=emote_only,
+                image_base64=self._latest_capture_image_b64 or None,
+            )
+>>>>>>> Stashed changes
             self.after(0, lambda: self._on_auto_streaming_response(answer, model, source, prompt, max_chars))
         except Exception as e:
             self.after(0, lambda: self.bot_control.log(f"⚠ Error IA automática: {e}"))
@@ -468,11 +643,33 @@ class MainWindow(ctk.CTk):
         self._cancel_poll_statuses()
         self._stop_workers()
         self._engine_running = False
+        self._latest_capture_image_b64 = ""
+        self.message_editor.clear_cycle_timing()
+        self.vision_panel.reset()
         self.bot_control.set_running(False)
         self.bot_control.log("■ Bots detenidos satisfactoriamente.")
         for name in load_accounts():
             self.account_panel.set_status(name["name"], "idle")
 
+<<<<<<< Updated upstream
+=======
+    def _on_refresh_config(self):
+        """Refresh config without stopping engine."""
+        if not self._engine_running:
+            self.bot_control.log("⚠ Los bots no están en ejecución.")
+            return
+
+        cfg = self.config_panel.get_spam_config()
+        self._engine.reconfigure(cfg)
+        self.bot_control.log(
+            f"✓ Configuracion refrescada: [{cfg.mode} | retraso={cfg.delay_min:.1f}s-{cfg.delay_max:.1f}s]"
+        )
+        self._auto_ai_delay_min_s = cfg.delay_min
+        self._auto_ai_delay_max_s = cfg.delay_max
+        if self.message_editor.is_stt_running():
+            self._schedule_auto_ai_request_range(cfg.delay_min, cfg.delay_max)
+
+>>>>>>> Stashed changes
     def _stop_workers(self):
         for worker in self._workers.values():
             worker.stop()

@@ -56,6 +56,15 @@ class MessageEditor(ctk.CTkFrame):
             text_color=C_MUTED
         ).pack(anchor="w", padx=14, pady=(0, 6))
 
+        self._cycle_info_lbl = ctk.CTkLabel(
+            self,
+            text="Ciclo IA: inactivo",
+            font=ctk.CTkFont("Segoe UI", 11, "bold"),
+            text_color="#9fb6ff",
+            justify="left",
+        )
+        self._cycle_info_lbl.pack(anchor="w", padx=14, pady=(0, 8))
+
         # Whisper transcription controls (compact and visible)
         stt_box = ctk.CTkFrame(self, fg_color="#191924", corner_radius=10)
         stt_box.pack(fill="x", padx=12, pady=(0, 8))
@@ -112,7 +121,7 @@ class MessageEditor(ctk.CTkFrame):
             text_color=C_TEXT,
         )
         self._stt_model_entry.grid(row=1, column=3, sticky="e", padx=(0, 8), pady=(0, 8))
-        self._stt_model_entry.insert(0, "small")
+        self._stt_model_entry.insert(0, "medium")
 
         self._stt_btn = ctk.CTkButton(
             stt_box,
@@ -211,7 +220,7 @@ class MessageEditor(ctk.CTkFrame):
             text_color=C_TEXT,
         )
         self._model_entry.grid(row=0, column=1, sticky="w", pady=(0, 6))
-        self._model_entry.insert(0, "llama3")
+        self._model_entry.insert(0, "qwen2.5vl:7b-q4_K_M")
 
         ctk.CTkLabel(
             ai_row,
@@ -247,10 +256,10 @@ class MessageEditor(ctk.CTkFrame):
             fg_color=C_SURFACE,
             border_color=C_BORDER,
             text_color=C_TEXT,
-            placeholder_text="500",
+            placeholder_text="60",
         )
         self._max_chars_entry.grid(row=0, column=5, sticky="w", pady=(0, 6))
-        self._max_chars_entry.insert(0, "500")
+        self._max_chars_entry.insert(0, "60")
 
         self._ai_input = ctk.CTkEntry(
             ai_row,
@@ -295,7 +304,7 @@ class MessageEditor(ctk.CTkFrame):
             self.on_stt_toggle(False, "", "")
             return
         device_hint = self._stt_device_combo.get().strip() or "CABLE Output"
-        model_size = self._stt_model_entry.get().strip() or "small"
+        model_size = self._stt_model_entry.get().strip() or "medium"
         self.on_stt_toggle(True, device_hint, model_size)
 
     def _refresh_stt_devices(self):
@@ -417,7 +426,7 @@ class MessageEditor(ctk.CTkFrame):
         return self._stt_running
 
     def get_ai_model(self) -> str:
-        return self._model_entry.get().strip() or "llama3"
+        return self._model_entry.get().strip() or "qwen2.5vl:7b-q4_K_M"
 
     def get_ai_prefix(self) -> str:
         return self._prefix_entry.get().strip()
@@ -427,5 +436,20 @@ class MessageEditor(ctk.CTkFrame):
         try:
             value = int(raw)
         except ValueError:
-            value = 500
+            value = 60
         return max(1, min(500, value))
+
+    def set_cycle_timing(self, t_s: float, t_half_s: float, t_minus_5_s: float):
+        self._cycle_info_lbl.configure(
+            text=(
+                f"Ciclo IA -> T={t_s:.1f}s (envio chat) | "
+                f"T/2={t_half_s:.1f}s (captura) | "
+                f"T-5={t_minus_5_s:.1f}s (respuesta IA)"
+            )
+        )
+
+    def set_cycle_info(self, text: str):
+        self._cycle_info_lbl.configure(text=text)
+
+    def clear_cycle_timing(self):
+        self._cycle_info_lbl.configure(text="Ciclo IA: inactivo")
