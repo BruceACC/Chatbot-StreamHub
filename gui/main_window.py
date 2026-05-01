@@ -9,6 +9,8 @@ import threading
 import logging
 import random
 import time
+import json
+import re
 
 from core.session_manager import load_accounts, add_account, delete_account, has_session
 from core.bot_worker import BotWorker
@@ -16,7 +18,7 @@ from core.spam_engine import SpamEngine, SpamConfig, SpamMode
 from core.browser_manager import shutdown_shared_browser_manager
 from core.hls_capture import capture_hls_snapshot
 from core.message_pool import MessagePool
-from core.ollama_client import generate_ollama_response, truncate_chat_text_ignoring_emotes
+from core.ollama_client import generate_ollama_response, truncate_chat_text_ignoring_emotes, LOCAL_OLLAMA_URL, REMOTE_OLLAMA_URL
 from core.audio_transcriber import LiveAudioTranscriber
 from gui.account_panel import AccountPanel
 from gui.config_panel import ConfigPanel
@@ -196,15 +198,17 @@ class MainWindow(ctk.CTk):
         default_count = self._get_target_ai_response_count()
         response_count = max(1, int(response_count_override)) if response_count_override is not None else default_count
         max_chars = self.message_editor.get_ai_max_chars()
+        ollama_url = self.message_editor.get_ollama_url()
 
         self.bot_control.log(f"🤖 Consultando IA ({model})...")
+        self.bot_control.log(f"🤖 Ollama activo: {ollama_url}")
         if response_count > 1:
             self.bot_control.log(
                 f"🤖 Generando {response_count} respuestas (una por cuenta, max {max_chars})."
             )
         thread = threading.Thread(
             target=self._ask_ollama_thread,
-            args=(prompt, model, response_count, max_chars, image_base64),
+            args=(prompt, model, response_count, max_chars, image_base64, ollama_url),
             daemon=True,
         )
         thread.start()
@@ -216,33 +220,128 @@ class MainWindow(ctk.CTk):
         response_count: int = 1,
         max_chars: int = 500,
         image_base64: str | None = None,
+        base_url: str | None = None,
     ):
         try:
             answers: list[str] = []
             total = max(1, int(response_count))
-            for idx in range(total):
-                if total > 1:
-                    variant_prompt = (
-                        f"{prompt}\n\n"
-                        f"Genera una variante distinta de chat para la cuenta #{idx + 1} de {total}. "
-                        "Debe ser diferente a las otras variantes, natural y breve."
-                    )
-                else:
-                    variant_prompt = prompt
+            is_remote = base_url and base_url.rstrip("/") == REMOTE_OLLAMA_URL.rstrip("/")
 
-                emote_only = random.random() < 0.30
-                answer = generate_ollama_response(
-                    variant_prompt,
-                    model=model,
-                    max_chars=max_chars,
-                    emote_only=emote_only,
-                    image_base64=image_base64,
+            if is_remote and total > 1:
+                combined_prompt = (
+                    f"{prompt}\n\n"
+                    f"Por favor, devuelve exactamente {total} respuestas variadas en formato JSON.\n"
+                    f"Cada respuesta debe ser distinta, natural y breve, como si fuera de cuentas diferentes.\n"
+                    f'Formato: {{"respuestas": ["respuesta1", "respuesta2", ..., "respuesta{total}"]}}'
                 )
-                answers.append(truncate_chat_text_ignoring_emotes(answer, max_chars))
+                emote_only = random.random() < 0.30
+                try:
+                    response_text = generate_ollama_response(
+                        combined_prompt,
+                        model=model,
+                        max_chars=max_chars * total,
+                        emote_only=emote_only,
+                        image_base64=image_base64,
+                        base_url=base_url,
+                    )
+                    answers.extend(
+                        self._extract_json_responses(
+                            response_text=response_text,
+                            total=total,
+                            max_chars=max_chars,
+                        )
+                    )
+                except (json.JSONDecodeError, ValueError) as parse_err:
+                    # Si el modelo rechaza JSON o devuelve texto libre, continuamos
+                    # con fallback individual por cuenta en lugar de fallar toda la tanda.
+                    self.bot_control.log(
+                        f"⚠ IA devolvio respuesta no-JSON para lote, activando fallback por cuenta: {parse_err}"
+                    )
+                if len(answers) < total:
+                    for idx in range(len(answers), total):
+                        variant_prompt = (
+                            f"{prompt}\n\n"
+                            f"Genera una variante distinta de chat para la cuenta #{idx + 1} de {total}. "
+                            "Debe ser diferente a las otras variantes, natural y breve."
+                        )
+                        emote_only = random.random() < 0.30
+                        answer = generate_ollama_response(
+                            variant_prompt,
+                            model=model,
+                            max_chars=max_chars,
+                            emote_only=emote_only,
+                            image_base64=image_base64,
+                            base_url=base_url,
+                        )
+                        answers.append(truncate_chat_text_ignoring_emotes(answer, max_chars))
+            else:
+                for idx in range(total):
+                    if total > 1:
+                        variant_prompt = (
+                            f"{prompt}\n\n"
+                            f"Genera una variante distinta de chat para la cuenta #{idx + 1} de {total}. "
+                            "Debe ser diferente a las otras variantes, natural y breve."
+                        )
+                    else:
+                        variant_prompt = prompt
+
+                    emote_only = random.random() < 0.30
+                    answer = generate_ollama_response(
+                        variant_prompt,
+                        model=model,
+                        max_chars=max_chars,
+                        emote_only=emote_only,
+                        image_base64=image_base64,
+                        base_url=base_url,
+                    )
+                    answers.append(truncate_chat_text_ignoring_emotes(answer, max_chars))
 
             self.after(0, lambda: self._on_ai_success(answers, model, max_chars))
         except Exception as e:
-            self.after(0, lambda: self._on_ai_error(str(e)))
+            self.after(0, lambda err=str(e): self._on_ai_error(err))
+
+    def _extract_json_responses(self, response_text: str, total: int, max_chars: int) -> list[str]:
+        json_start = response_text.find("{")
+        json_end = response_text.rfind("}")
+        answers: list[str] = []
+
+        if json_start >= 0 and json_end > json_start:
+            json_str = response_text[json_start : json_end + 1]
+            data = json.loads(json_str)
+            raw_responses = data.get("respuestas")
+            if not isinstance(raw_responses, list):
+                raise ValueError("JSON no contiene lista de respuestas")
+            for resp in raw_responses:
+                answers.append(truncate_chat_text_ignoring_emotes(str(resp), max_chars))
+            return answers[:total]
+
+        # Fallback tolerante: respuestas truncadas sin cerrar JSON.
+        key_pos = response_text.find('"respuestas"')
+        if key_pos < 0:
+            raise ValueError("No se encontró JSON en la respuesta")
+
+        list_start = response_text.find("[", key_pos)
+        if list_start < 0:
+            raise ValueError("No se encontró lista de respuestas en la respuesta")
+
+        # Extrae strings JSON aunque falte el cierre del array/objeto.
+        raw_list_chunk = response_text[list_start:]
+        string_pattern = re.compile(r'"((?:\\\\.|[^"\\\\])*)"')
+        for match in string_pattern.finditer(raw_list_chunk):
+            token = match.group(1)
+            try:
+                parsed = json.loads(f'"{token}"')
+            except json.JSONDecodeError:
+                parsed = token
+            parsed = str(parsed).strip()
+            if parsed:
+                answers.append(truncate_chat_text_ignoring_emotes(parsed, max_chars))
+            if len(answers) >= total:
+                break
+
+        if not answers:
+            raise ValueError("No se pudieron extraer respuestas del JSON truncado")
+        return answers[:total]
 
     def _on_ai_success(self, answers: list[str], model: str, max_chars: int):
         safe_answers = [self._format_ai_message(a, max_chars=max_chars) for a in answers if a and a.strip()]
@@ -355,19 +454,19 @@ class MainWindow(ctk.CTk):
 
         t_s = self._pick_auto_ai_cycle_delay(self._auto_ai_delay_min_s, self._auto_ai_delay_max_s)
         t_half_s = t_s / 2.0
-        t_minus_5_s = max(0.5, t_s - 5.0)
+        t_mul_07_s = max(0.5, t_s * 0.7)
 
         self._auto_ai_cycle_index += 1
         self._auto_ai_cycle_t_s = t_s
         self._auto_ai_delay_s = t_s
 
-        self.vision_panel.set_cycle(self._auto_ai_cycle_index, t_s, t_half_s, t_minus_5_s)
+        self.vision_panel.set_cycle(self._auto_ai_cycle_index, t_s, t_half_s, t_mul_07_s)
         self.bot_control.log(
-            f"[Vision HLS] Ciclo #{self._auto_ai_cycle_index}: T={t_s:.1f}s | T/2={t_half_s:.1f}s | T-5={t_minus_5_s:.1f}s"
+            f"[Vision HLS] Ciclo #{self._auto_ai_cycle_index}: T={t_s:.1f}s | T/2={t_half_s:.1f}s | T*0.7={t_mul_07_s:.1f}s"
         )
 
         self._auto_ai_capture_job_id = self.after(int(t_half_s * 1000), self._auto_ai_capture_tick)
-        self._auto_ai_job_id = self.after(int(t_minus_5_s * 1000), self._auto_ai_request_tick)
+        self._auto_ai_job_id = self.after(int(t_mul_07_s * 1000), self._auto_ai_request_tick)
         self._auto_ai_cycle_end_job_id = self.after(int(t_s * 1000), self._auto_ai_cycle_end_tick)
 
     def _auto_ai_cycle_end_tick(self):
@@ -423,7 +522,7 @@ class MainWindow(ctk.CTk):
             return
 
         self.vision_panel.set_cycle_info(
-            f"Ciclo IA -> T-5 alcanzado: la IA responde ahora (T={self._auto_ai_cycle_t_s:.1f}s)."
+            f"Ciclo IA -> T*0.7 alcanzado: la IA responde ahora (T={self._auto_ai_cycle_t_s:.1f}s)."
         )
 
         prompt = self.message_editor.get_ai_input()
@@ -490,12 +589,14 @@ class MainWindow(ctk.CTk):
         try:
             max_chars = self.message_editor.get_ai_max_chars()
             emote_only = random.random() < 0.25
+            ollama_url = self.message_editor.get_ollama_url()
             answer = generate_ollama_response(
                 prompt,
                 model=model,
                 max_chars=max_chars,
                 emote_only=emote_only,
                 image_base64=self._latest_capture_image_b64 or None,
+                base_url=ollama_url,
             )
             self.after(0, lambda: self._on_auto_streaming_response(answer, model, source, prompt, max_chars))
         except Exception as e:

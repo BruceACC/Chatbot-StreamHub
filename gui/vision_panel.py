@@ -38,7 +38,7 @@ class VisionPanel(ctk.CTkFrame):
 
         self._cycle_lbl = ctk.CTkLabel(
             body,
-            text="T=--.-s | T/2=--.-s | T-5=--.-s",
+            text="T=--.-s | T/2=--.-s | T*0.7=--.-s",
             font=ctk.CTkFont("Segoe UI", 11, "bold"),
             text_color=C_TEXT,
             justify="left",
@@ -66,15 +66,15 @@ class VisionPanel(ctk.CTkFrame):
         )
         self._capture_lbl.pack(anchor="w", padx=12, pady=(0, 10))
 
-    def set_cycle(self, cycle_index: int, t_s: float, t_half_s: float, t_minus_5_s: float):
+    def set_cycle(self, cycle_index: int, t_s: float, t_half_s: float, t_mul_07_s: float):
         self._cycle_lbl.configure(
-            text=f"T={t_s:.1f}s | T/2={t_half_s:.1f}s | T-5={t_minus_5_s:.1f}s"
+            text=f"T={t_s:.1f}s | T/2={t_half_s:.1f}s | T*0.7={t_mul_07_s:.1f}s"
         )
         self._cycle_info_lbl.configure(
             text=(
                 f"Ciclo IA -> T={t_s:.1f}s (envio chat) | "
                 f"T/2={t_half_s:.1f}s (captura) | "
-                f"T-5={t_minus_5_s:.1f}s (respuesta IA)"
+                f"T*0.7={t_mul_07_s:.1f}s (respuesta IA)"
             )
         )
         self._capture_lbl.configure(text="Captura HLS: pendiente", text_color=C_MUTED)
@@ -90,6 +90,6 @@ class VisionPanel(ctk.CTkFrame):
             self._capture_lbl.configure(text="Captura HLS: FAIL", text_color="#ff6666")
 
     def reset(self):
-        self._cycle_lbl.configure(text="T=--.-s | T/2=--.-s | T-5=--.-s")
+        self._cycle_lbl.configure(text="T=--.-s | T/2=--.-s | T*0.7=--.-s")
         self._cycle_info_lbl.configure(text="Ciclo IA: inactivo")
         self._capture_lbl.configure(text="Captura HLS: pendiente", text_color=C_MUTED)

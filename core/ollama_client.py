@@ -1,17 +1,60 @@
 """
 ollama_client.py
-Minimal client for local Ollama HTTP API.
+Minimal client for Ollama HTTP API.
 """
 
 import json
 import os
 import re
+import socket
 import urllib.error
 import urllib.request
 
 
-DEFAULT_OLLAMA_URL = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
+LOCAL_OLLAMA_URL = "http://127.0.0.1:11434"
+REMOTE_OLLAMA_URL = "http://desktop-fufpeoh:11434"
+DEFAULT_OLLAMA_MODEL = "qwen2.5vl:7b-q4_K_M"
+DEFAULT_OLLAMA_TIMEOUT_SECONDS = 180
 EMOTE_TOKEN_RE = re.compile(r"\[emote:\d+:[^\]]+\]")
+
+
+def _resolve_default_ollama_url() -> str:
+    ollama_host = os.getenv("OLLAMA_HOST", "").strip().rstrip("/")
+    if ollama_host:
+        return ollama_host
+
+    ollama_mode = os.getenv("OLLAMA_MODE", "").strip().lower()
+    if ollama_mode == "remote":
+        return REMOTE_OLLAMA_URL
+    if ollama_mode == "local":
+        return LOCAL_OLLAMA_URL
+
+    return LOCAL_OLLAMA_URL
+
+
+DEFAULT_OLLAMA_URL = _resolve_default_ollama_url()
+
+
+def _resolve_ollama_url(base_url: str | None = None) -> str:
+    if base_url and base_url.strip():
+        return base_url.strip().rstrip("/")
+    return _resolve_default_ollama_url()
+
+
+def _debug_ollama_endpoint(endpoint: str) -> None:
+    debug_flag = os.getenv("OLLAMA_DEBUG_ENDPOINT", "").strip().lower()
+    if debug_flag in {"1", "true", "yes", "on"}:
+        print(f"[Ollama] Endpoint: {endpoint}")
+
+
+def _resolve_ollama_timeout_seconds() -> int:
+    raw = os.getenv("OLLAMA_TIMEOUT_SECONDS", "").strip()
+    if not raw:
+        return DEFAULT_OLLAMA_TIMEOUT_SECONDS
+    try:
+        return max(30, min(600, int(raw)))
+    except ValueError:
+        return DEFAULT_OLLAMA_TIMEOUT_SECONDS
 
 
 EMOTE_GUIDE = """
@@ -127,10 +170,11 @@ def strip_unicode_emojis(text: str) -> str:
 
 def generate_ollama_response(
     prompt: str,
-    model: str = "llama3",
+    model: str = DEFAULT_OLLAMA_MODEL,
     max_chars: int = 500,
     emote_only: bool = False,
     image_base64: str | None = None,
+    base_url: str | None = None,
 ) -> str:
     if not prompt.strip():
         raise ValueError("El prompt de IA no puede estar vacio.")
@@ -175,7 +219,9 @@ Responde de forma casual, natural y corta como lo haría una persona mirando la 
     if image_base64:
         payload["images"] = [image_base64]
 
-    endpoint = f"{DEFAULT_OLLAMA_URL.rstrip('/')}/api/generate"
+    ollama_url = _resolve_ollama_url(base_url)
+    endpoint = f"{ollama_url}/api/generate"
+    _debug_ollama_endpoint(endpoint)
     req = urllib.request.Request(
         endpoint,
         data=json.dumps(payload).encode("utf-8"),
@@ -184,8 +230,13 @@ Responde de forma casual, natural y corta como lo haría una persona mirando la 
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        timeout_seconds = _resolve_ollama_timeout_seconds()
+        with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
             data = json.loads(resp.read().decode("utf-8"))
+    except (TimeoutError, socket.timeout) as e:
+        raise RuntimeError(
+            f"Ollama tardó demasiado en responder (timeout {timeout_seconds}s)."
+        ) from e
     except urllib.error.HTTPError as e:
         details = e.read().decode("utf-8", errors="ignore")
         raise RuntimeError(f"HTTP {e.code} de Ollama: {details}") from e

@@ -5,6 +5,9 @@ Center-bottom panel: multiline text area where each line is one message.
 
 import customtkinter as ctk
 
+from core.app_settings import load_settings, save_settings
+from core.ollama_client import DEFAULT_OLLAMA_URL, LOCAL_OLLAMA_URL, REMOTE_OLLAMA_URL
+
 C_PANEL   = "#16161e"
 C_SURFACE = "#1e1e2a"
 C_ACCENT  = "#53fc18"
@@ -190,7 +193,7 @@ class MessageEditor(ctk.CTkFrame):
             placeholder_text="!tts",
         )
         self._prefix_entry.pack(side="left", padx=(0, 10))
-        self._prefix_entry.insert(0, "!tts")
+     #   self._prefix_entry.insert(0, "")
 
         ctk.CTkLabel(
             txt_tools_row,
@@ -261,6 +264,47 @@ class MessageEditor(ctk.CTkFrame):
         )
         self._model_entry.grid(row=0, column=1, sticky="w", pady=(0, 6))
         self._model_entry.insert(0, "qwen2.5vl:7b-q4_K_M")
+
+        ollama_row = ctk.CTkFrame(self, fg_color="transparent")
+        ollama_row.pack(fill="x", padx=12, pady=(0, 8))
+
+        ctk.CTkLabel(
+            ollama_row,
+            text="Ollama:",
+            font=ctk.CTkFont("Segoe UI", 11, "bold"),
+            text_color=C_MUTED,
+        ).pack(side="left", padx=(0, 8))
+
+        self._ollama_mode_var = ctk.StringVar(value=self._default_ollama_mode())
+
+        ctk.CTkRadioButton(
+            ollama_row,
+            text="Local",
+            value="local",
+            variable=self._ollama_mode_var,
+            fg_color=C_ACCENT,
+            hover_color="#3acc10",
+            text_color=C_TEXT,
+            command=self._save_ollama_url,
+        ).pack(side="left", padx=(0, 10))
+
+        ctk.CTkRadioButton(
+            ollama_row,
+            text="Red",
+            value="red",
+            variable=self._ollama_mode_var,
+            fg_color=C_ACCENT,
+            hover_color="#3acc10",
+            text_color=C_TEXT,
+            command=self._save_ollama_url,
+        ).pack(side="left")
+
+        ctk.CTkLabel(
+            ollama_row,
+            text="Selecciona dónde corre la IA",
+            font=ctk.CTkFont("Segoe UI", 10),
+            text_color=C_MUTED,
+        ).pack(side="right")
 
         self._ai_input = ctk.CTkEntry(
             ai_row,
@@ -434,6 +478,48 @@ class MessageEditor(ctk.CTkFrame):
 
     def get_ai_model(self) -> str:
         return self._model_entry.get().strip() or "qwen2.5vl:7b-q4_K_M"
+
+    def get_ollama_url(self) -> str:
+        if self._ollama_mode_var.get() == "red":
+            return REMOTE_OLLAMA_URL
+        return LOCAL_OLLAMA_URL
+
+    def get_ollama_mode(self) -> str:
+        return self._ollama_mode_var.get().strip() or "local"
+
+    def _load_ollama_mode(self) -> str:
+        settings = load_settings()
+        saved_mode = str(settings.get("ollama_mode", "")).strip().lower()
+        if saved_mode in ("local", "red"):
+            return saved_mode
+
+        saved_url = str(settings.get("ollama_url", "")).strip().rstrip("/")
+        if saved_url == REMOTE_OLLAMA_URL:
+            return "red"
+        if saved_url == LOCAL_OLLAMA_URL:
+            return "local"
+
+        if saved_url:
+            return "red"
+
+        normalized = DEFAULT_OLLAMA_URL.rstrip("/")
+        if normalized == REMOTE_OLLAMA_URL:
+            return "red"
+        return "local"
+
+    def _default_ollama_mode(self) -> str:
+        return self._load_ollama_mode()
+
+    def _save_ollama_url(self):
+        try:
+            save_settings(
+                {
+                    "ollama_mode": self.get_ollama_mode(),
+                    "ollama_url": self.get_ollama_url(),
+                }
+            )
+        except Exception:
+            pass
 
     def get_ai_prefix(self) -> str:
         return self._prefix_entry.get().strip()
